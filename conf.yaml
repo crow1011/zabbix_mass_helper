@@ -1,0 +1,7 @@
+hosts_file_path: 'hosts'
+
+logger:
+  log_level: 'debug' #debug, info, warning, error
+  log_file: 'main.log'
+  #pls don't change
+  log_dir: './'

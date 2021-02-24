@@ -1,11 +1,46 @@
 from pyzabbix.api import ZabbixAPI, ZabbixAPIException
-import ipaddress
+import logging
+import yaml
+
+
+conf_path = 'conf.yaml'
+
+
+def get_config(conf_path=conf_path):
+    with open(conf_path, 'r') as file:
+        conf = yaml.load(file, Loader=yaml.FullLoader)
+    return conf
+
+def get_logger(logger_conf):
+    log_file = logger_conf['log_dir'] + logger_conf['log_file']
+    logger = logging.getLogger(__name__)
+    fh = logging.FileHandler(log_file)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+    log_level = {
+        'debug': logging.DEBUG,
+        'info': logging.INFO,
+        'warning': logging.WARNING,
+        'error': logging.ERROR
+    }
+    logger.setLevel(log_level[logger_conf['log_level']])
+    return logger
+
+
 zapi = ZabbixAPI(url='http://192.168.1.104', user='Admin', password='zabbix')
 
 
-def get_hosts():
+def get_hosts(hosts_path):
+    """
+    Открывает hosts файл в режиме чтения
+    разбивает весь файл на группы
+    формирует и отдает dict в котором
+    ключ первого уровня это группа, дальше хост, дальше информация по хосту
+    """
+    logger.debug(f'Get hosts. Hosts path: {hosts_path}')
     hosts_res = {}
-    with open('hosts', 'r') as f:
+    with open(hosts_path, 'r') as f:
         hosts_raw = f.read()
 
     hosts_groups_tmp = hosts_raw.split('[')
@@ -119,12 +154,17 @@ def sync_proxy(sync_hosts):
                             "hosts": host_ids})
 
 
-hosts_res = get_hosts()
-zbx_groups = sync_zbx_groups()
-sync_hosts = sync_zbx_hosts(hosts_res, zbx_groups)
-print(sync_hosts)
-sync_proxy = sync_proxy(sync_hosts)
+
 # print(hosts_res)
 # print(zbx_groups)
 # print(sync_hosts)
 # print(sync_proxy)
+if __name__=='__main__':
+    conf = get_config(conf_path)
+    logger = get_logger(conf['logger'])
+    logger.info('START')
+    hosts_res = get_hosts(conf['hosts_file_path'])
+    zbx_groups = sync_zbx_groups()
+    sync_hosts = sync_zbx_hosts(hosts_res, zbx_groups)
+    print(sync_hosts)
+    sync_proxy = sync_proxy(sync_hosts)
