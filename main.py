@@ -3,10 +3,7 @@ import logging
 import yaml
 
 
-conf_path = 'conf.yaml'
-
-
-def get_config(conf_path=conf_path):
+def get_config(conf_path):
     with open(conf_path, 'r') as file:
         conf = yaml.load(file, Loader=yaml.FullLoader)
     return conf
@@ -27,8 +24,6 @@ def get_logger(logger_conf):
     logger.setLevel(log_level[logger_conf['log_level']])
     return logger
 
-
-zapi = ZabbixAPI(url='http://192.168.1.104', user='Admin', password='zabbix')
 
 
 def get_hosts(hosts_path):
@@ -52,41 +47,51 @@ def get_hosts(hosts_path):
         hosts_list = list(filter(None, hosts.split('\n')))
         for host in hosts_list:
             host_name, host_ip = host.split()
-            # добавь сюда проверку на дубликаты
             hosts_res[group][host_name] = {}
             hosts_res[group][host_name]['ip'] = host_ip.replace('ansible_host=', '')
     return hosts_res
 
 
-def sync_zbx_groups():
-    # добавь фильтрацию
-    result3 = zapi.do_request('hostgroup.get', {})
-    zbx_all_groups = {}
-    for result in result3['result']:
-        zbx_all_groups[result['name']] = result['groupid']
-
+def sync_zbx_groups(zapi, src_groups):
+    """
+    Синхронизирует список групп из файла hosts и группы в zabbix
+    Если какой-то группы не существует в zabbix, то она будет создана
+    Вернет список групп с идентификаторами
+    """
+    logger.debug('Sync zabbix groups')
+    results = zapi.do_request('hostgroup.get', {'name' : src_groups})
     zbx_groups = {}
-    for hosts_group in hosts_res.keys():
-        if hosts_group not in zbx_all_groups.keys():
+    for result in results['result']:
+        zbx_groups[result['name']] = result['groupid']
+    logger.debug(f'Exist groups: {zbx_groups}')
+    for hosts_group in src_groups:
+        if hosts_group not in zbx_groups.keys():
             res = zapi.do_request('hostgroup.create', {"name": hosts_group})
             zbx_groups[hosts_group] = res['result']['groupids'][0]
-        else:
-            zbx_groups[hosts_group] = zbx_all_groups[hosts_group]
+    logger.debug(f'Zabbix groups list after sync: {zbx_groups}')
     return zbx_groups
 
 
-def sync_zbx_hosts(hosts_res, zbx_groups):
+def sync_zbx_hosts(zapi, hosts_res, zbx_groups):
+    """
+    Синхронизирует список хостов в zabbix
+    Запрашивает список хостов для каждой группы
+    Сверяет список хостов, если в zabbix хост отсутствует - создает
+    возвращает обогащенный id список хостов
+    """
     for group, hosts in hosts_res.items():
-        # добавь фильтрацию
+        # запрашиваем список существующих хостов
         hosts_zbx_group_tmp = zapi.do_request('host.get', {"groupids": zbx_groups[group]})['result']
         hosts_zbx_group = {}
+        # формируем словарь с информацией по хостам, ключи - названия хостов
         for zbx_group_result in hosts_zbx_group_tmp:
-            # print(zbx_group_result)
             hosts_zbx_group[zbx_group_result['host']] = {}
             hosts_zbx_group[zbx_group_result['host']]['host'] = zbx_group_result['host']
             hosts_zbx_group[zbx_group_result['host']]['hostid'] = zbx_group_result['hostid']
+
         for host, host_info in hosts.items():
             if host not in hosts_zbx_group.keys():
+                # если хост не создан в zabbix - создаем
                 res_create_host = zapi.do_request('host.create', {
                                                     "host": host,
                                                     "interfaces": [
@@ -115,12 +120,18 @@ def sync_zbx_hosts(hosts_res, zbx_groups):
                 hosts_zbx_group[host]['hostid'] = res_create_host['result']['hostids'][0]
                 hosts_res[group][host]['hostid'] = hosts_zbx_group[host]['hostid']
             else:
+                # если создан, сохраняем его id
                 hosts_res[group][host]['hostid'] = hosts_zbx_group[host]['hostid']
     return hosts_res
 
 
-def sync_proxy(sync_hosts):
-    proxy_name_templ = 'zabbix-proxy-'
+def sync_zbx_proxy(zapi, sync_hosts, proxy_name_templ):
+    """
+    генерирует список zabbix-proxy и запрашивает по несу существующие proxy
+    если proxy для группы не существует - создает
+    если существует - обновляет список хостов
+    Последнее действие, ничего возвращает
+    """
     sync_proxies_names = [proxy_name_templ + proxy_name for proxy_name in sync_hosts.keys()]
     zbx_proxies_tmp = zapi.do_request('proxy.get', {'filter': {'host': sync_proxies_names}, })
     zbx_proxies = {}
@@ -130,14 +141,13 @@ def sync_proxy(sync_hosts):
     for proxy_name, hosts in sync_hosts.items():
         host_ids = [host_info['hostid'] for host_info in hosts.values()]
         tmp_ip_for_proxy = hosts[list(hosts.keys())[0]]['ip']
+        # формируем ip zabbix-proxy-*
         proxy_ip = tmp_ip_for_proxy.split('.')
         proxy_ip[-1] = '1'
         proxy_ip = '.'.join(proxy_ip)
-        print(proxy_ip)
-
-
         if proxy_name_templ + proxy_name not in zbx_proxies.keys():
-            zapi.do_request('proxy.create',{
+            # если proxy не создан - создаем
+            zapi.do_request('proxy.create', {
                 "host": proxy_name_templ + proxy_name,
                 "status": "6",
                 "interface": {
@@ -148,23 +158,21 @@ def sync_proxy(sync_hosts):
                      },
                      "hosts": host_ids})
         else:
-            # print(proxy_name_templ + proxy_name)
+            # если создан обновляем список хостов
             zapi.do_request('proxy.update', {
                             "proxyid": zbx_proxies[proxy_name_templ + proxy_name],
                             "hosts": host_ids})
 
 
 
-# print(hosts_res)
-# print(zbx_groups)
-# print(sync_hosts)
-# print(sync_proxy)
 if __name__=='__main__':
+    conf_path = 'conf.yaml'
     conf = get_config(conf_path)
     logger = get_logger(conf['logger'])
-    logger.info('START')
+    zapi = ZabbixAPI(url=conf['zabbix']['url'], user=conf['zabbix']['user'], password=conf['zabbix']['password'])
+    logger.debug('Debug mode')
     hosts_res = get_hosts(conf['hosts_file_path'])
-    zbx_groups = sync_zbx_groups()
-    sync_hosts = sync_zbx_hosts(hosts_res, zbx_groups)
-    print(sync_hosts)
-    sync_proxy = sync_proxy(sync_hosts)
+    src_groups = list(hosts_res.keys())
+    zbx_groups = sync_zbx_groups(zapi, src_groups)
+    sync_hosts = sync_zbx_hosts(zapi, hosts_res, zbx_groups)
+    sync_zbx_proxy(zapi, sync_hosts, conf['proxy_name_templ'])

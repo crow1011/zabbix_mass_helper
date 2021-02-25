@@ -1,4 +1,5 @@
 tst.py
 venv/
 .idea/
-.log
+*.log
+__pycache__/

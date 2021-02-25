@@ -1,7 +1,11 @@
 hosts_file_path: 'hosts'
+zabbix:
+  url: 'http://192.168.1.104'
+  user: 'Admin'
+  password: 'zabbix'
 
+proxy_name_templ: 'zabbix-proxy-'
 logger:
   log_level: 'debug' #debug, info, warning, error
   log_file: 'main.log'
-  #pls don't change
   log_dir: './'
