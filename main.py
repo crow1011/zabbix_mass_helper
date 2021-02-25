@@ -1,4 +1,4 @@
-from pyzabbix.api import ZabbixAPI, ZabbixAPIException
+from pyzabbix.api import ZabbixAPI
 import logging
 import yaml
 
@@ -7,6 +7,7 @@ def get_config(conf_path):
     with open(conf_path, 'r') as file:
         conf = yaml.load(file, Loader=yaml.FullLoader)
     return conf
+
 
 def get_logger(logger_conf):
     log_file = logger_conf['log_dir'] + logger_conf['log_file']
@@ -23,7 +24,6 @@ def get_logger(logger_conf):
     }
     logger.setLevel(log_level[logger_conf['log_level']])
     return logger
-
 
 
 def get_hosts(hosts_path):
@@ -59,7 +59,7 @@ def sync_zbx_groups(zapi, src_groups):
     Вернет список групп с идентификаторами
     """
     logger.debug('Sync zabbix groups')
-    results = zapi.do_request('hostgroup.get', {'name' : src_groups})
+    results = zapi.do_request('hostgroup.get', {'name': src_groups})
     zbx_groups = {}
     for result in results['result']:
         zbx_groups[result['name']] = result['groupid']
@@ -93,28 +93,28 @@ def sync_zbx_hosts(zapi, hosts_res, zbx_groups):
             if host not in hosts_zbx_group.keys():
                 # если хост не создан в zabbix - создаем
                 res_create_host = zapi.do_request('host.create', {
-                                                    "host": host,
-                                                    "interfaces": [
-                                                        {
-                                                            "type": 1,
-                                                            "main": 1,
-                                                            "useip": 1,
-                                                            "ip": host_info['ip'],
-                                                            "dns": "",
-                                                            "port": "10050"
-                                                        }
-                                                    ],
-                                                    "groups": [
-                                                        {
-                                                            "groupid": zbx_groups[group]
-                                                        }
-                                                    ],
-                                                    "templates": [
-                                                        {
-                                                            "templateid": "10001"
-                                                        }
-                                                    ]
-                                                })
+                    "host": host,
+                    "interfaces": [
+                        {
+                            "type": 1,
+                            "main": 1,
+                            "useip": 1,
+                            "ip": host_info['ip'],
+                            "dns": "",
+                            "port": "10050"
+                        }
+                    ],
+                    "groups": [
+                        {
+                            "groupid": zbx_groups[group]
+                        }
+                    ],
+                    "templates": [
+                        {
+                            "templateid": "10001"
+                        }
+                    ]
+                })
                 hosts_zbx_group[host] = {}
                 hosts_zbx_group[host]['host'] = host
                 hosts_zbx_group[host]['hostid'] = res_create_host['result']['hostids'][0]
@@ -155,17 +155,16 @@ def sync_zbx_proxy(zapi, sync_hosts, proxy_name_templ):
                     "dns": "",
                     "useip": "1",
                     "port": "10051"
-                     },
-                     "hosts": host_ids})
+                },
+                "hosts": host_ids})
         else:
             # если создан обновляем список хостов
             zapi.do_request('proxy.update', {
-                            "proxyid": zbx_proxies[proxy_name_templ + proxy_name],
-                            "hosts": host_ids})
+                "proxyid": zbx_proxies[proxy_name_templ + proxy_name],
+                "hosts": host_ids})
 
 
-
-if __name__=='__main__':
+if __name__ == '__main__':
     conf_path = 'conf.yaml'
     conf = get_config(conf_path)
     logger = get_logger(conf['logger'])
